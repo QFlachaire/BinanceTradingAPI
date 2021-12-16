@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+
+import os
+from dotenv import load_dotenv
+import requests
+
+load_dotenv()
+
+print(os.environ.get("apiToken"))
+
+baseUrl = "https://api.binance.com/"
+versionUrl = "api/v3/"
+
+def getAllCrypto():
+
+    url = baseUrl + versionUrl + "exchangeInfo"
+
+    response = requests.get(url)
+    data = response.json()
+
+    allCrypto = []
+    for crypto in data["symbols"]:
+        if crypto["baseAsset"] not in allCrypto:
+            allCrypto.append(crypto["baseAsset"]) 
+    return allCrypto
+
+def getDepth(direction, assetName):
+
+    url = baseUrl + versionUrl + "depth"
+
+    params = {"symbol" : assetName, "limit" : 1}
+
+    response = requests.get(url, params=params)
+    data = response.json()
+    return data[direction][0][0]
+
+
+def getOrderBook(assetName, limit):
+
+    url = baseUrl + versionUrl + "depth"
+
+    params = {"symbol" : assetName, "limit" : limit}
+
+    response = requests.get(url, params=params)
+    data = response.json()
+    print(data["bids"])
+
+
+
+
+if __name__ == '__main__' :
+    #Get a list of all available cryptocurrencies and display it
+    # allCrypto = getAllCrypto()
+    
+    #Create a function to display the ask or bid price of an asset. 
+    # getDepth("bids", "BTCUSDT")
+    
+    #Get order book for an asset
+    getOrderBook("BTCUSDT", 10)
+    
