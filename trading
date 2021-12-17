@@ -4,15 +4,19 @@ import os
 from dotenv import load_dotenv
 import requests
 
+import sqlite3
+con = sqlite3.connect('dbTrading')
+
+import hmac
+import hashlib
+import time
 load_dotenv()
 
-print(os.environ.get("apiToken"))
-
 baseUrl = "https://api.binance.com/"
+version1Url = "api/v1/"
 versionUrl = "api/v3/"
 
 def getAllCrypto():
-
     url = baseUrl + versionUrl + "exchangeInfo"
 
     response = requests.get(url)
@@ -24,28 +28,112 @@ def getAllCrypto():
             allCrypto.append(crypto["baseAsset"]) 
     return allCrypto
 
-def getDepth(direction, assetName):
-
+def getDepth(direction, pair):
     url = baseUrl + versionUrl + "depth"
-
-    params = {"symbol" : assetName, "limit" : 1}
+    params = {"symbol" : pair, "limit" : 1}
 
     response = requests.get(url, params=params)
     data = response.json()
     return data[direction][0][0]
 
 
-def getOrderBook(assetName, limit):
-
+def getOrderBook(pair, limit):
     url = baseUrl + versionUrl + "depth"
-
-    params = {"symbol" : assetName, "limit" : limit}
+    params = {"symbol" : pair, "limit" : limit}
 
     response = requests.get(url, params=params)
     data = response.json()
-    print(data["bids"])
+    return (data["bids"], data["asks"])
+
+def refreshDataCandle(pair, duration):
+    url = baseUrl + versionUrl + "klines"
+    params = {"symbol" : pair, "interval" : duration, "limit" : 5}
+
+    response = requests.get(url, params=params)
+    
+    data = response.json()
+    print(len(data))
+    cur = con.cursor()
+    
+    lastupdate = 0
+    for row in cur.execute('SELECT date FROM candles ORDER BY date DESC LIMIT 1'):
+        lastupdate = row[0]
+
+    i = 0
+    allcandles = []
+    for candle in data:
+        if candle[0] > lastupdate:
+            allcandles.append([])
+            allcandles[i].append(candle[0])
+            allcandles[i].append(candle[2])
+            allcandles[i].append(candle[3])
+            allcandles[i].append(candle[1])
+            allcandles[i].append(candle[4])
+            allcandles[i].append(candle[5])
+            i += 1
+    cur.executemany(''' Insert into candles(date, high, low, open, close, volume) values(?,?,?,?,?,?) ''', allcandles)
+
+    con.commit()
+    con.close()
+
+def createDbCrypto ():
+    #Create a db for each crypto
+
+    cur = con.cursor()
+    cur.execute('''CREATE TABLE candles (Id INTEGER PRIMARY KEY, date INT, high REAL, low REAL, open REAL, close REAL, volume REAL);''')
+    cur.execute('''CREATE TABLE last_checks(Id INTEGER PRIMARY KEY, exchange TEXT, trading_pair TEXT, duration TEXT, table_name TEXT, last_check INT, startdate INT, last_id INT);''')
+    cur.execute('''CREATE TABLE allCandles (Id INTEGER PRIMARY KEY, uuid TEXT, traded_crypto REAL, price REAL, created_at_int INT, side TEXT); ''')
+    
+    con.commit()
+    con.close()
 
 
+
+def createOrder(api_key, secret_key, direction, price, amount, pair = 'BTCUSDT', orderType = 'LIMIT'):
+    
+    timestamp = requests.get(baseUrl + versionUrl + "time").json()["serverTime"]
+
+    params={
+        'symbol': pair, 
+        'side': direction, 
+        'type': orderType,
+        "quantity": amount,
+        'price': price,
+        'timestamp': timestamp,
+        'timeInForce': "GTC"
+    }
+    query = f"symbol={pair}&side={direction}&type={orderType}&quantity={amount}&price={price}&timestamp={timestamp}&timeInForce=GTC"
+
+    url = baseUrl + versionUrl + "order?" + query
+    auth = (api_key, secret_key)
+
+    signature = hmac.new(secret_key.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
+    headers = {"X-MBX-APIKEY": api_key}
+
+    response = requests.post(url+f"&signature={signature}", auth=auth, headers=headers)
+
+    print(response.json())
+    return response.json()
+
+def cancelOrder(id, api_key, secret_key, pair = 'BTCUSDT'):
+    timestamp = requests.get(baseUrl + versionUrl + "time").json()["serverTime"]
+
+    params={
+        'symbol': pair, 
+        'timestamp': timestamp,
+        'orderId': id
+    }
+    query = f"symbol={pair}&timestamp={timestamp}&orderId={id}"
+
+    url = baseUrl + versionUrl + "order?" + query
+    auth = (api_key, secret_key)
+
+    signature = hmac.new(secret_key.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
+    headers = {"X-MBX-APIKEY": api_key}
+
+    response = requests.delete(url+f"&signature={signature}", auth=auth, headers=headers)
+
+    return response.text
 
 
 if __name__ == '__main__' :
@@ -56,5 +144,18 @@ if __name__ == '__main__' :
     # getDepth("bids", "BTCUSDT")
     
     #Get order book for an asset
-    getOrderBook("BTCUSDT", 10)
-    
+    # bids, asks = getOrderBook("BTCUSDT", 10)
+    # print(bids, asks)
+    #createDbCrypto()
+    refreshDataCandle("BTCUSDT", "1m")
+
+    api_key = os.environ.get("apiToken")
+    secret_key = os.environ.get("apiKey")
+    direction = "BUY"
+    price = "20000"
+    amount = "0.00110"
+
+    id = createOrder(api_key, secret_key, direction, price, amount)
+    print(id["orderId"])
+    time.sleep(1)
+    print(cancelOrder(id["orderId"], api_key, secret_key))
