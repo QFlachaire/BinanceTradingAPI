@@ -1,13 +1,11 @@
 # BinanceTradingAPI
 
+Simple implementation of the Binance API.
 
-bid/ask in order book
+Features:
 
-historique
-teekcharger chandelles
--stockage
+- Store orderbook.
 
+- Store Candle History in SQL.
 
-nom tables : echange-pair-freq
-
-
+- Post and Delete order.
